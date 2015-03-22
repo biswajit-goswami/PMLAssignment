@@ -1,0 +1,116 @@
+---
+title: "AssignmentWriteup"
+author: "Biswajit Goswami"
+date: "Sunday, March 22, 2015"
+output: html_document
+---
+
+Summary of the steps:  
+1.Load the training and test data from the links provided in the assignment.  
+2.Analyse the data by checking the summary of the different columns.  
+(Perform the below steps  till step# 6 for both test and training data)  
+3.Remove the columns with all NA values.  
+4.Remove the columns related to timestamps as they are useless for the prediction.  
+5.Remove the columns like user_names,etc as they also are useless for prediction.    
+6.Impute and normalize the data.  
+7.Partition the training data with 75% going into the next step of training the model with cross validation as 
+  pre process step.  
+8.The model found most accurate is random forest.Hence ,during training the model used is "rf".  
+9.The confusion matrix of the predictions with the training data and the validation data is reasonable ~ 99%.  
+10.Finally,the model is applied to the actual test data to predict the outcomes.  
+
+Step 0:Enable global caching
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache=TRUE)
+```
+
+Step1:The training and test csv are already downloaded in the working directory.
+```{r,cache=TRUE}
+training_base <- read.csv(file="pml-training.csv", header=TRUE, as.is = TRUE, stringsAsFactors = FALSE, sep=',', na.strings=c('NA','','#DIV/0!'))
+testing_base <- read.csv(file="pml-testing.csv", header=TRUE, as.is = TRUE, stringsAsFactors = FALSE, sep=',', na.strings=c('NA','','#DIV/0!'))
+
+```
+
+Step2:Peek at the data
+```{r,echo=FALSE}
+str(training_base);
+    ```
+Too many NA columns.  
+Lets check the classe parameter:
+    ```{r,echo=FALSE}
+summary(training_base$classe)
+```
+Lets convert to factor type:
+```{r}
+training_base$classe <- as.factor(training_base$classe)
+```
+Initial number of predictors
+```{r,cache=TRUE,echo=FALSE}
+ncol(training_base)-1
+```
+which is a big number.We will reduce it after removing NA and redundant variables.
+
+Step#3-6:Done for both training and test data
+```{r,cache=TRUE}
+#Remove NA columns
+NAindex <- apply(training_base,2,function(x) {sum(is.na(x))}) 
+training_base <- training_base[,which(NAindex == 0)]
+NAindex <- apply(testing_base,2,function(x) {sum(is.na(x))}) 
+testing_base <- testing_base[,which(NAindex == 0)]
+
+#remove timestamp related columns
+training_base=training_base[,-which(grepl("time",names(training_base))=="TRUE")];
+testing_base=testing_base[,-which(grepl("time",names(testing_base))=="TRUE")];
+
+#removing some more redundant columns
+training_base=subset(training_base,select=-c(user_name,new_window))
+training_base=training_base[,-1]
+testing_base=subset(testing_base,select=-c(user_name,new_window))
+testing_base=testing_base[,-1]
+
+#preprocess:impute and normalize
+library(caret)
+v <- which(lapply(training_base, class) %in% "numeric")
+
+preObj <-preProcess(training_base[,v],method=c('knnImpute', 'center', 'scale'))
+trainProcessed <- predict(preObj, training_base[,v])
+trainProcessed$classe <- training_base$classe
+
+testProcessed <-predict(preObj,testing_base[,v])
+```
+
+Finally,the number of predictors to be used for further traing steps:
+```{r,cache=TRUE,echo=FALSE}
+ncol(trainProcessed)-1;
+```
+The number of predictors is manageable now.
+
+Step7:Data partition
+```{r,cache=TRUE}
+#data partition
+set.seed(121212)
+
+trainIndex = createDataPartition(trainProcessed$classe, p = .75, list=FALSE)
+training_cv = trainProcessed[trainIndex,]
+validation_cv = trainProcessed[-trainIndex,]
+```
+
+Step8-9:Train model with 5 fold CV as preprocess step.
+```{r,cache=TRUE}
+#train model using Random forest,applying cross validation as pre process step
+modFit <- train(classe ~., method="rf", data=training_cv, trControl=trainControl(method='cv'), number=5, allowParallel=TRUE )
+trainingPred <- predict(modFit, training_cv)
+confusionMatrix(trainingPred, training_cv$classe)
+```
+The cross validated accuracy is 100%
+```{r,cache=TRUE}
+cvPred <- predict(modFit, validation_cv)
+confusionMatrix(cvPred, validation_cv$classe)
+```
+The out of sample accuracy is ~99%
+
+Step10:Finally predict the outcomes with the actual test set.
+```{r,cache=TRUE}
+testingPred <- predict(modFit, testProcessed)
+print(testingPred)
+```
